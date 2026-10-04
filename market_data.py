@@ -111,76 +111,188 @@ def _industry_label(value) -> str:
 
 
 def fetch_twse_universe() -> pd.DataFrame:
-    """Fetch listed + OTC common-stock universe with official broad industry."""
-    tickers: list[tuple[str, str, str]] = []
-    headers = {"User-Agent": "Mozilla/5.0 AlphaRadar/16.0"}
+    """Fetch a production-safe TWSE + TPEx common-stock universe.
 
-    # TWSE company master is preferred because it carries the official industry
-    # code. STOCK_DAY_ALL remains a resilient fallback if the master is down.
-    twse_loaded = False
-    try:
-        r = requests.get("https://openapi.twse.com.tw/v1/opendata/t187ap03_L", headers=headers, timeout=10)
-        if r.ok:
-            for item in r.json():
-                code = str(item.get("公司代號") or item.get("Code") or "").strip()
-                name = str(item.get("公司簡稱") or item.get("公司名稱") or item.get("Name") or "").strip()
-                industry = _industry_label(item.get("產業別") or item.get("IndustryCode") or "")
-                if len(code) == 4 and code.isdigit() and not code.startswith("0"):
-                    tickers.append((f"{code}.TW", name, industry or "上市"))
-                    twse_loaded = True
-    except Exception:
-        pass
+    V16.1 hotfix:
+    - TPEx's JSON endpoint can return an HTTP-200 HTML/redirect page on some
+      cloud deployments.  A successful HTTP status is therefore *not* treated
+      as a successful roster response unless the payload is actually a list.
+    - TPEx has four official/fallback paths: primary OpenAPI, alternate OpenAPI,
+      official MOPS CSV, and latest TPEx close-quote roster.
+    - TWSE and TPEx are validated separately.  A missing whole market is never
+      silently accepted just because the combined count is above a low floor.
+    """
+    headers = {
+        "User-Agent": "Mozilla/5.0 (compatible; AlphaRadar/16.1; +https://streamlit.io)",
+        "Accept": "application/json,text/csv,text/plain,*/*",
+    }
 
-    if not twse_loaded:
+    twse_rows: list[tuple[str, str, str]] = []
+    tpex_rows: list[tuple[str, str, str]] = []
+    source_notes: list[str] = []
+
+    def _valid_code(value: Any) -> str:
+        code = str(value or "").strip()
+        if len(code) == 4 and code.isdigit() and not code.startswith("0"):
+            return code
+        return ""
+
+    def _safe_json(url: str, timeout: int = 12) -> Any:
         try:
-            r = requests.get("https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL", headers=headers, timeout=10)
-            if r.ok:
-                for item in r.json():
-                    code = str(item.get("Code", "")).strip()
-                    name = str(item.get("Name", "")).strip()
-                    if len(code) == 4 and code.isdigit() and not code.startswith("0"):
-                        tickers.append((f"{code}.TW", name, "上市"))
+            r = requests.get(url, headers=headers, timeout=timeout, allow_redirects=True)
+            if not r.ok:
+                return None
+            ctype = str(r.headers.get("content-type", "")).lower()
+            # Some TPEx failure pages are HTML with HTTP 200.  Reject them
+            # before calling .json() so the next fallback still gets a chance.
+            head = (r.text or "")[:200].lstrip().lower()
+            if "html" in ctype or head.startswith("<!doctype html") or head.startswith("<html"):
+                return None
+            js = r.json()
+            return js
         except Exception:
-            pass
+            return None
 
-    try:
-        r = requests.get("https://www.tpex.org.tw/openapi/v1/mopsfin_t187ap03_O", headers=headers, timeout=10)
-        if not r.ok:
-            r = requests.get("https://www.tpex.org.tw/openapi/v1/mopsfront_t187ap03_O", headers=headers, timeout=10)
-        if r.ok:
-            for item in r.json():
-                code = str(
-                    item.get("SecuritiesCompanyCode")
-                    or item.get("公司代號")
-                    or item.get("公司代碼")
-                    or ""
-                ).strip()
-                name = str(
-                    item.get("CompanyAbbreviation")
-                    or item.get("CompanyName")
-                    or item.get("Company Name")
-                    or item.get("公司簡稱")
-                    or item.get("公司名稱")
-                    or ""
-                ).strip()
-                industry = _industry_label(
-                    item.get("SecuritiesIndustryCode") or item.get("產業別") or item.get("IndustryCode") or ""
-                )
-                if len(code) == 4 and code.isdigit() and not code.startswith("0"):
-                    tickers.append((f"{code}.TWO", name, industry or "上櫃"))
-    except Exception:
-        pass
+    def _append_json_rows(payload: Any, market: str) -> int:
+        if not isinstance(payload, list):
+            return 0
+        target = twse_rows if market == "TW" else tpex_rows
+        before = len(target)
+        for item in payload:
+            if not isinstance(item, dict):
+                continue
+            code = _valid_code(
+                item.get("公司代號")
+                or item.get("SecuritiesCompanyCode")
+                or item.get("Code")
+                or item.get("公司代碼")
+            )
+            if not code:
+                continue
+            name = str(
+                item.get("公司簡稱")
+                or item.get("CompanyAbbreviation")
+                or item.get("公司名稱")
+                or item.get("CompanyName")
+                or item.get("Company Name")
+                or item.get("Name")
+                or item.get("SecuritiesCompanyName")
+                or ""
+            ).strip()
+            industry = _industry_label(
+                item.get("產業別")
+                or item.get("SecuritiesIndustryCode")
+                or item.get("IndustryCode")
+                or ""
+            )
+            suffix = ".TW" if market == "TW" else ".TWO"
+            target.append((f"{code}{suffix}", name or code, industry or ("上市" if market == "TW" else "上櫃")))
+        return len(target) - before
 
-    if not tickers:
-        backup = [
-            ("2330.TW", "台積電", "半導體業"), ("2317.TW", "鴻海", "其他電子業"),
-            ("2454.TW", "聯發科", "半導體業"), ("2382.TW", "廣達", "電腦及週邊設備業"),
-            ("3231.TW", "緯創", "電腦及週邊設備業"), ("3017.TW", "奇鋐", "電腦及週邊設備業"),
-            ("6669.TW", "緯穎", "電腦及週邊設備業"), ("1519.TW", "華城", "電機機械"),
-        ]
-        return pd.DataFrame(backup, columns=["ticker", "name", "industry"])
+    def _append_csv_rows(url: str, market: str) -> int:
+        target = twse_rows if market == "TW" else tpex_rows
+        before = len(target)
+        try:
+            r = requests.get(url, headers=headers, timeout=15, allow_redirects=True)
+            if not r.ok or not r.content:
+                return 0
+            # Official MOPS CSV is UTF-8 (often with BOM).  Decode defensively.
+            raw = r.content.decode("utf-8-sig", errors="replace")
+            if "公司代號" not in raw[:1000]:
+                return 0
+            from io import StringIO
+            df = pd.read_csv(StringIO(raw), dtype=str)
+            if df.empty:
+                return 0
+            for _, row in df.iterrows():
+                code = _valid_code(row.get("公司代號"))
+                if not code:
+                    continue
+                name = str(row.get("公司簡稱") or row.get("公司名稱") or code).strip()
+                industry = _industry_label(row.get("產業別") or "")
+                suffix = ".TW" if market == "TW" else ".TWO"
+                target.append((f"{code}{suffix}", name or code, industry or ("上市" if market == "TW" else "上櫃")))
+            return len(target) - before
+        except Exception:
+            return 0
 
-    return pd.DataFrame(tickers, columns=["ticker", "name", "industry"]).drop_duplicates("ticker")
+    # ---------- TWSE company master ----------
+    payload = _safe_json("https://openapi.twse.com.tw/v1/opendata/t187ap03_L")
+    n = _append_json_rows(payload, "TW")
+    if n:
+        source_notes.append(f"TWSE master {n}")
+    else:
+        # Official MOPS CSV fallback preserves company industry metadata.
+        n = _append_csv_rows("https://mopsfin.twse.com.tw/opendata/t187ap03_L.csv", "TW")
+        if n:
+            source_notes.append(f"TWSE MOPS CSV {n}")
+        else:
+            # Last-resort official latest quote roster (industry unavailable).
+            q = _safe_json("https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL")
+            n = _append_json_rows(q, "TW")
+            if n:
+                source_notes.append(f"TWSE daily roster {n}")
+
+    # ---------- TPEx company master ----------
+    # Primary endpoint is known to return a 200 HTML unavailable/redirect page
+    # in some cloud environments.  We explicitly test payload type and continue.
+    for url, label in [
+        ("https://www.tpex.org.tw/openapi/v1/mopsfin_t187ap03_O", "TPEx primary"),
+        ("https://www.tpex.org.tw/openapi/v1/mopsfront_t187ap03_O", "TPEx alternate"),
+    ]:
+        payload = _safe_json(url)
+        n = _append_json_rows(payload, "TWO")
+        if n:
+            source_notes.append(f"{label} {n}")
+            break
+
+    if not tpex_rows:
+        # Official government open-data CSV.  This is the most important cloud
+        # fallback and currently contains the full OTC company master.
+        n = _append_csv_rows("https://mopsfin.twse.com.tw/opendata/t187ap03_O.csv", "TWO")
+        if n:
+            source_notes.append(f"TPEx MOPS CSV {n}")
+
+    if not tpex_rows:
+        # Final official roster fallback.  It has no industry field, so the UI
+        # will show broad '上櫃' until a company master is available, but the
+        # stock is still allowed to participate in the market scan.
+        payload = _safe_json("https://www.tpex.org.tw/openapi/v1/tpex_mainboard_daily_close_quotes")
+        n = _append_json_rows(payload, "TWO")
+        if n:
+            source_notes.append(f"TPEx daily roster {n}")
+
+    # Deduplicate each market before validating counts.
+    twse_df = pd.DataFrame(twse_rows, columns=["ticker", "name", "industry"]).drop_duplicates("ticker") if twse_rows else pd.DataFrame(columns=["ticker", "name", "industry"])
+    tpex_df = pd.DataFrame(tpex_rows, columns=["ticker", "name", "industry"]).drop_duplicates("ticker") if tpex_rows else pd.DataFrame(columns=["ticker", "name", "industry"])
+
+    twse_n = int(len(twse_df))
+    tpex_n = int(len(tpex_df))
+
+    # Conservative production floors.  They are deliberately below normal
+    # market counts to tolerate listings/delistings, while still detecting the
+    # catastrophic failure mode of losing an entire exchange.
+    MIN_TWSE_COMMON = 850
+    MIN_TPEX_COMMON = 650
+    MIN_TOTAL_COMMON = 1600
+
+    if twse_n < MIN_TWSE_COMMON or tpex_n < MIN_TPEX_COMMON or (twse_n + tpex_n) < MIN_TOTAL_COMMON:
+        detail = "; ".join(source_notes) if source_notes else "no successful source"
+        raise RuntimeError(
+            "股票母體不完整："
+            f"上市 {twse_n} 檔、上櫃 {tpex_n} 檔、合計 {twse_n + tpex_n} 檔。"
+            "為避免漏掉整個市場後仍產生推薦，本次更新已中止並保留上一份成功快照。"
+            f" 資料來源：{detail}"
+        )
+
+    out = pd.concat([twse_df, tpex_df], ignore_index=True).drop_duplicates("ticker")
+    # Attach diagnostics without changing the public dataframe schema used by
+    # radar_service.py.  This is useful for interactive debugging if needed.
+    out.attrs["twse_count"] = twse_n
+    out.attrs["tpex_count"] = tpex_n
+    out.attrs["total_count"] = int(len(out))
+    out.attrs["sources"] = source_notes
+    return out
 
 
 class DailyPriceStore:
