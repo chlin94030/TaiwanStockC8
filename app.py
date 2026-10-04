@@ -16,7 +16,7 @@ import streamlit as st
 import radar_service as service
 from industry_profile import fine_industry
 from intraday_engine import FinMindRealtimeClient, candidate_tickers, market_is_open, rerank_snapshot
-from market_data import DailyPriceStore, ResearchDataClient, _taipei_timestamp, provider_runtime_status
+from market_data import DailyPriceStore, _taipei_timestamp, provider_runtime_status
 from policy_engine import HORIZONS
 from presentation import investment_view, intraday_view
 from return_first_model import holding_review
@@ -46,7 +46,7 @@ HOLD_LABELS = {
 
 def _bootstrap_secrets():
     """Expose Streamlit secrets to the data layer without hard-coding tokens."""
-    for key in ("FINMIND_TOKEN", "ENABLE_BRANCH_FLOW"):
+    for key in ("FINMIND_TOKEN",):
         if os.getenv(key):
             continue
         try:
@@ -89,7 +89,7 @@ header[data-testid="stHeader"]{background:rgba(245,244,239,.96);backdrop-filter:
 .q{padding:9px 10px;border-right:1px solid var(--line);min-width:0}.q:last-child{border-right:0}.qk{font-size:.72rem;color:var(--muted);font-weight:800}.qv{font-size:.94rem;font-weight:900;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .liveflag{display:inline-flex;align-items:center;gap:6px;font-size:.78rem;font-weight:900;color:var(--green);letter-spacing:.04em}.dot{width:7px;height:7px;border-radius:50%;background:var(--green);box-shadow:0 0 0 3px rgba(7,135,93,.12)}
 .offflag{font-size:.78rem;font-weight:850;color:var(--muted)}
-.datagrid{display:grid;grid-template-columns:repeat(4,1fr);border:1px solid var(--line);background:var(--surface);margin:8px 0 12px}.datum{padding:10px;border-right:1px solid var(--line);border-bottom:1px solid var(--line)}.datum:nth-child(4n){border-right:0}.dk{font-size:.74rem;color:var(--muted);font-weight:800}.dv{font-size:1rem;font-weight:950;margin-top:3px}.ds{font-size:.73rem;color:var(--muted);margin-top:2px;line-height:1.3}.flowbar{display:grid;grid-template-columns:repeat(5,1fr);gap:1px;background:var(--line);border:1px solid var(--line);margin:6px 0 10px}.flowbar>div{background:var(--surface);padding:8px 9px}.flowbar small{display:block;color:var(--muted);font-weight:800}.flowbar b{display:block;margin-top:2px;font-size:.95rem}.overview{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:6px 0 14px}.ovcol{border:1px solid var(--line);background:var(--surface)}.ovhead{padding:10px;border-bottom:1px solid var(--line);font-weight:950}.ovitem{display:grid;grid-template-columns:32px 1fr;gap:8px;padding:10px;border-bottom:1px solid var(--line)}.ovitem:last-child{border-bottom:0}.ovrank{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;color:#9a9b95;font-weight:900}.ovname{font-weight:900}.ovmeta{font-size:.8rem;color:var(--muted);margin-top:2px}.consensus{border:1px solid var(--line);background:var(--surface);padding:10px 11px;margin:10px 0 6px}.consensus b{font-size:1rem}.sectorbar{display:flex;gap:7px;overflow-x:auto;padding:4px 0 10px;margin-bottom:4px;scrollbar-width:none}.sectorbar::-webkit-scrollbar{display:none}.sectorpill{flex:0 0 auto;border:1px solid var(--line);background:var(--surface);padding:7px 10px;border-radius:999px;font-size:.78rem;font-weight:850;color:#3f434a}.sectorpill b{color:var(--ink);margin-left:4px}.sectorpill.hot{border-color:#bfd3f7;background:#f1f6ff;color:#0b57d0}.sectorpill.weak{background:#faf4f0;color:#8a3b11}.consensus-note{font-size:.79rem;color:var(--muted);margin-top:4px}
+.datagrid{display:grid;grid-template-columns:repeat(4,1fr);border:1px solid var(--line);background:var(--surface);margin:8px 0 12px}.datum{padding:10px;border-right:1px solid var(--line);border-bottom:1px solid var(--line)}.datum:nth-child(4n){border-right:0}.dk{font-size:.74rem;color:var(--muted);font-weight:800}.dv{font-size:1rem;font-weight:950;margin-top:3px}.ds{font-size:.73rem;color:var(--muted);margin-top:2px;line-height:1.3}.flowbar{display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:var(--line);border:1px solid var(--line);margin:6px 0 10px}.flowbar>div{background:var(--surface);padding:8px 9px}.flowbar small{display:block;color:var(--muted);font-weight:800}.flowbar b{display:block;margin-top:2px;font-size:.95rem}.overview{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:6px 0 14px}.ovcol{border:1px solid var(--line);background:var(--surface)}.ovhead{padding:10px;border-bottom:1px solid var(--line);font-weight:950}.ovitem{display:grid;grid-template-columns:32px 1fr;gap:8px;padding:10px;border-bottom:1px solid var(--line)}.ovitem:last-child{border-bottom:0}.ovrank{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;color:#9a9b95;font-weight:900}.ovname{font-weight:900}.ovmeta{font-size:.8rem;color:var(--muted);margin-top:2px}.consensus{border:1px solid var(--line);background:var(--surface);padding:10px 11px;margin:10px 0 6px}.consensus b{font-size:1rem}.sectorbar{display:flex;gap:7px;overflow-x:auto;padding:4px 0 10px;margin-bottom:4px;scrollbar-width:none}.sectorbar::-webkit-scrollbar{display:none}.sectorpill{flex:0 0 auto;border:1px solid var(--line);background:var(--surface);padding:7px 10px;border-radius:999px;font-size:.78rem;font-weight:850;color:#3f434a}.sectorpill b{color:var(--ink);margin-left:4px}.sectorpill.hot{border-color:#bfd3f7;background:#f1f6ff;color:#0b57d0}.sectorpill.weak{background:#faf4f0;color:#8a3b11}.consensus-note{font-size:.79rem;color:var(--muted);margin-top:4px}
 .plan{display:grid;grid-template-columns:repeat(5,1fr);gap:1px;background:var(--line);border:1px solid var(--line);margin-bottom:8px}.plan>div{background:var(--surface);padding:9px}.plan small{display:block;color:var(--muted);font-weight:800}.plan b{display:block;margin-top:3px;font-size:.98rem}
 .chartchips{display:flex;gap:12px;align-items:center;font-size:.76rem;color:var(--muted);margin:4px 0 1px;flex-wrap:wrap}.chipline{display:inline-block;width:18px;height:3px;vertical-align:middle;margin-right:5px}.ma5{background:#111318}.ma20{background:#0b57d0}.ma60{background:#f08c00}.ma120{background:#7b61ff}.ma240{background:#2f9e44}.bb{background:#d9480f}.ind-caption{font-size:.78rem;color:var(--muted);margin:2px 0 6px}
 .mini-note{font-size:.78rem;color:var(--muted);line-height:1.4}
@@ -216,75 +216,6 @@ def _render_fundamental_charts(stock: dict, key: str):
         st.dataframe(ddf.rename(columns={"date":"日期","foreign_net_lots":"外資(張)","trust_net_lots":"投信(張)","dealer_net_lots":"自營商(張)","total_net_lots":"合計(張)"}), hide_index=True, use_container_width=True)
 
 
-def _render_optional_chip_data(stock: dict, key: str):
-    ticker = str(stock.get("ticker") or "")
-    stock_id = ticker.split(".")[0]
-    status = provider_runtime_status()
-    token_ready = bool(status.get("finmind_token_configured"))
-    c1, c2 = st.columns(2)
-    with c1:
-        branch_click = st.button("載入近10日分點", key=f"branch_btn_{key}", use_container_width=True, disabled=not token_ready)
-    with c2:
-        holding_click = st.button("載入股權分布", key=f"holding_btn_{key}", use_container_width=True, disabled=not token_ready)
-    if not token_ready:
-        st.caption("分點與股權分布需設定 FINMIND_TOKEN；分點需 Sponsor 權限。")
-        return
-    bkey=f"branch_cache_{ticker}"; hkey=f"holding_cache_{ticker}"
-    if branch_click:
-        with st.spinner("載入券商分點…"):
-            st.session_state[bkey]=ResearchDataClient(DATA_DIR/"research_cache.sqlite").branch_main_force_proxy(stock_id,max_sessions=10,force=True)
-    if holding_click:
-        with st.spinner("載入股權分布…"):
-            st.session_state[hkey]=ResearchDataClient(DATA_DIR/"research_cache.sqlite").holding_distribution(stock_id)
-    branch=st.session_state.get(bkey)
-    if isinstance(branch,dict):
-        if branch.get("available"):
-            st.markdown("#### 券商分點代理")
-            buys=(branch.get("top_buy_branches") or [])[:3]; sells=(branch.get("top_sell_branches") or [])[:3]
-            cols=st.columns(2)
-            with cols[0]:
-                st.caption("前三大淨買")
-                for x in buys: st.write(f"{x.get('name')}  {float(x.get('net_lots') or 0):+,.0f} 張")
-            with cols[1]:
-                st.caption("前三大淨賣")
-                for x in sells: st.write(f"{x.get('name')}  {float(x.get('net_lots') or 0):+,.0f} 張")
-            daily = branch.get("daily_rows") or []
-            if daily:
-                bdf = pd.DataFrame(daily)
-                fig = go.Figure(go.Bar(
-                    x=bdf["date"], y=pd.to_numeric(bdf["net_lots"], errors="coerce"),
-                    marker_color=np.where(pd.to_numeric(bdf["net_lots"], errors="coerce") >= 0, "rgba(217,45,32,.72)", "rgba(7,135,93,.72)"),
-                    hovertemplate="%{x}<br>分點淨額 %{y:+,.0f} 張<extra></extra>"
-                ))
-                fig.update_layout(height=220, margin=dict(l=5,r=5,t=8,b=5), showlegend=False, paper_bgcolor="#fffefb", plot_bgcolor="#fffefb", bargap=.12)
-                fig.update_xaxes(type="category", nticks=5, fixedrange=True)
-                fig.update_yaxes(gridcolor="#ecebe5", fixedrange=True, title="張")
-                st.plotly_chart(fig, use_container_width=True, key=f"{key}_branch_daily", config={"displayModeBar":False})
-            st.caption("分點為交易行為代理，非官方『主力』分類；FinMind 分點資料通常盤後約21:00更新，非盤中即時。")
-        else:
-            st.caption("分點資料未取得："+str(branch.get("reason") or "權限/資料尚未更新"))
-    holding=st.session_state.get(hkey)
-    if isinstance(holding,dict):
-        if holding.get("available"):
-            st.markdown("#### 股權集中")
-            c1,c2=st.columns(2)
-            c1.metric("大戶持股約", f"{float(holding.get('large_holder_pct') or 0):.1f}%", help="約以持股1000張以上分級加總")
-            c2.metric("散戶持股約", f"{float(holding.get('retail_pct') or 0):.1f}%", help="約以持股400張以下分級加總")
-            hist = holding.get("history") or []
-            if len(hist) >= 2:
-                hdf = pd.DataFrame(hist)
-                fig = go.Figure()
-                fig.add_trace(go.Scatter(x=hdf["date"], y=pd.to_numeric(hdf["large_holder_pct"],errors="coerce"), mode="lines+markers", name="大戶%", line=dict(width=2.0)))
-                fig.add_trace(go.Scatter(x=hdf["date"], y=pd.to_numeric(hdf["retail_pct"],errors="coerce"), mode="lines+markers", name="散戶%", line=dict(width=2.0)))
-                fig.update_layout(height=230, margin=dict(l=5,r=5,t=8,b=5), paper_bgcolor="#fffefb", plot_bgcolor="#fffefb", legend=dict(orientation="h", y=1.12), hovermode="x unified")
-                fig.update_xaxes(type="category", nticks=5, fixedrange=True)
-                fig.update_yaxes(gridcolor="#ecebe5", fixedrange=True, title="%")
-                st.plotly_chart(fig, use_container_width=True, key=f"{key}_holding_trend", config={"displayModeBar":False})
-            st.caption("資料日："+str(holding.get("latest_date") or "—")+"；大戶/散戶為持股級距近似值，只作籌碼觀察，不進入核心排名。")
-        else:
-            st.caption("股權分布未取得："+str(holding.get("reason") or "權限/資料不足"))
-
-
 def _render_research(stock: dict):
     rev, fin, val, inst, main = _research(stock)
     latest = rev.get("latest") or {}
@@ -309,7 +240,6 @@ def _render_research(stock: dict):
       <div><small>投信</small><b>{esc(lots(inst.get('trust_net_lots')) if inst.get('available') else '—')}</b></div>
       <div><small>自營商</small><b>{esc(lots(inst.get('dealer_net_lots')) if inst.get('available') else '—')}</b></div>
       <div><small>三大法人合計</small><b>{esc(lots(inst.get('total_net_lots')) if inst.get('available') else '—')}</b></div>
-      <div><small>分點代理</small><b>{esc(lots(main.get('proxy_net_lots')) if main.get('available') else '按下方載入')}</b></div>
     </div>""", unsafe_allow_html=True)
     if qs:
         st.dataframe(pd.DataFrame([{"季度":q.get("quarter"),"EPS":q.get("eps"),"同年度累積EPS*":q.get("eps_ytd_sum_unadjusted"),"毛利率(%)":q.get("gross_margin_pct")} for q in qs[-4:]]),hide_index=True,use_container_width=True)
@@ -322,7 +252,6 @@ def _render_research(stock: dict):
     key=str(stock.get("ticker") or "x").replace(".","_")
     if st.toggle("顯示營收 / EPS / 法人明細", value=False, key=f"fund_toggle_{key}"):
         _render_fundamental_charts(stock,key)
-    _render_optional_chip_data(stock,key)
 
 
 def _chart_dataframe(chart: dict) -> pd.DataFrame:
@@ -713,7 +642,6 @@ def main():
         status = provider_runtime_status()
         st.caption("FinMind Token：" + ("已設定" if status.get("finmind_token_configured") else "未設定"))
         st.caption("盤中：FinMind Sponsor 即時快照；約60秒重排")
-        st.caption("分點：點個股內按鈕後載入；約21:00更新")
         if st.button("清除快取"):
             DailyPriceStore(DATA_DIR / "daily_prices.sqlite").clear()
             service.remove_saved_dashboard(DATA_DIR / "dashboard_snapshot.json")
