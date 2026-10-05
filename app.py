@@ -1,4 +1,4 @@
-"""Alpha Radar V16 — final evidence, live-overlay Taiwan research UI."""
+"""Alpha Radar V16.1 — final evidence + automatic intraday overlay UI."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -452,7 +452,7 @@ def _market_header(snap: dict | None):
     if "T" in generated: generated=generated.replace("T"," ")[:19]
     parts=[f"<span><b>基準 {esc(snap.get('price_date') or '—')}</b> 完整日線</span>",f"<span>{esc(REGIME.get(m.get('regime'),'大盤待確認'))}</span>",f"<span>上市 {esc(off.get('twse_date') or '—')}</span>",f"<span>上櫃 {esc(off.get('tpex_date') or '—')}</span>"]
     if generated: parts.append(f"<span>模型更新 {esc(generated)}</span>")
-    if market_is_open(_taipei_timestamp()): parts.append("<span class='liveflag'><i class='dot'></i>盤中可用即時覆蓋</span>")
+    if market_is_open(_taipei_timestamp()): parts.append("<span class='liveflag'><i class='dot'></i>盤中即時自動重排</span>")
     stale=int(cov.get("stale_excluded") or 0)
     if stale: parts.append(f"<span>{stale:,} 檔舊資料已排除</span>")
     rc=cov.get("recommendation_research") or {}
@@ -477,18 +477,22 @@ def _intraday_render_once(snap: dict, horizon: str = "short", top_n: int = 8):
         st.markdown(f"<div class='offflag'>{label} · {esc(now.strftime('%Y-%m-%d %H:%M:%S'))} · 09:00–13:30 才啟用盤中排序</div>",unsafe_allow_html=True)
         _render_daily_list(snap,horizon,n=min(top_n,5)); return
     client=FinMindRealtimeClient()
-    if not client.configured:
-        st.warning("盤中即時資料需要 FinMind Sponsor Token；目前顯示最近完整日線排名。")
-        _render_daily_list(snap,horizon,n=min(top_n,5)); return
     tickers=candidate_tickers(snap,per_horizon=40)
     df,status=client.snapshots(tickers)
     if not status.available:
-        st.warning(f"即時資料暫不可用：{status.reason}"); _render_daily_list(snap,horizon,n=min(top_n,5)); return
+        st.warning(f"盤中即時資料暫不可用：{status.reason}；目前顯示最近完整日線排名。")
+        _render_daily_list(snap,horizon,n=min(top_n,5)); return
     live=rerank_snapshot(snap,horizon,df,top_n=top_n)
     twii=df[df["stock_id"].astype(str)=="001"] if "stock_id" in df.columns else pd.DataFrame()
     idx_change=finite(twii.iloc[-1].get("change_rate")) if not twii.empty else None
     fetched=(status.fetched_at or now.isoformat(timespec="seconds")).replace("T"," ")[:19]
-    st.markdown(f"<div class='marketbar'><span class='liveflag'><i class='dot'></i>盤中即時</span><span>{esc(fetched)}</span><span>基準日線 {esc(snap.get('price_date') or '—')}</span><span>加權 {esc(pp(idx_change,2))}</span><span>{esc(H_LABEL[horizon])}</span></div>",unsafe_allow_html=True)
+    st.markdown(
+        f"<div class='marketbar'><span class='liveflag'><i class='dot'></i>盤中即時</span>"
+        f"<span>{esc(fetched)}</span><span>來源 {esc(status.source)}</span>"
+        f"<span>基準日線 {esc(snap.get('price_date') or '—')}</span>"
+        f"<span>加權 {esc(pp(idx_change,2))}</span><span>{esc(H_LABEL[horizon])}</span></div>",
+        unsafe_allow_html=True,
+    )
     if not live: st.info("即時資料已取得，但候選股目前無可排序資料。"); return
     for i,stock in enumerate(live,1): _row(stock,horizon,snap,i,live=True)
 
@@ -504,7 +508,22 @@ else:
 
 
 
-def _overview(snap: dict | None):
+def _live_rankings(snap: dict | None, top_n: int = 5):
+    """Fetch one realtime batch and return live rankings for all horizons."""
+    if not snap or not market_is_open(_taipei_timestamp()):
+        return None, None
+    client=FinMindRealtimeClient()
+    tickers=candidate_tickers(snap,per_horizon=45)
+    df,status=client.snapshots(tickers)
+    if not status.available or df.empty:
+        return None, status
+    out={h: rerank_snapshot(snap,h,df,top_n=top_n) for h in ["short","mid","long"]}
+    if not any(out.values()):
+        return None, status
+    return out, status
+
+
+def _overview(snap: dict | None, allow_live: bool = True):
     if not snap:
         st.info("請先更新市場資料。")
         return
@@ -523,6 +542,21 @@ def _overview(snap: dict | None):
 
     mapping = [("short", "短線 · 約2週"), ("mid", "中線 · 約2個月"), ("long", "長線 · 約6個月")]
     raw = {h: service.select_market_best(snap, h, n=5) for h, _ in mapping}
+    live_status=None
+    if allow_live and market_is_open(_taipei_timestamp()):
+        live_raw, live_status=_live_rankings(snap,top_n=5)
+        if live_raw:
+            raw=live_raw
+            fetched=(live_status.fetched_at or _taipei_timestamp().isoformat(timespec="seconds")).replace("T"," ")[:19]
+            st.markdown(
+                f"<div class='marketbar'><span class='liveflag'><i class='dot'></i>盤中總覽已即時重排</span>"
+                f"<span>{esc(fetched)}</span><span>來源 {esc(live_status.source)}</span>"
+                f"<span>基準完整日線 {esc(snap.get('price_date') or '—')}</span></div>",
+                unsafe_allow_html=True,
+            )
+        elif live_status is not None:
+            st.warning(f"盤中行情暫不可用：{live_status.reason}；以下暫顯示 {snap.get('price_date') or '最近完整交易日'} 的基準排名。")
+
     cols_html = []
     dup_counts = {}
     for h, title in mapping:
@@ -533,11 +567,15 @@ def _overview(snap: dict | None):
             dup_counts[code] = dup_counts.get(code, 0) + 1
             name = str(stock.get('name') or code)
             fine = str(stock.get('fine_industry') or stock.get('industry') or '')
-            score = (stock.get('horizons', {}).get(h, {}) or {}).get('ranking_score')
+            live_score=finite(stock.get('live_ranking_score'))
+            score = live_score if live_score is not None else finite((stock.get('horizons', {}).get(h, {}) or {}).get('ranking_score'))
+            change=finite((stock.get('intraday') or {}).get('change_rate_pct'))
             comp=((stock.get('horizons',{}).get(h,{}) or {}).get('score_components') or {})
             mainline_score=finite(comp.get('mainline'))
-            meta=f"{fine} · 分數 {nfmt(score,1)}"
-            if mainline_score is not None:
+            meta=f"{fine} · {'盤中' if live_score is not None else '基準'}分數 {nfmt(score,1)}"
+            if change is not None:
+                meta += f" · 今日 {change:+.2f}%"
+            elif mainline_score is not None:
                 meta += f" · 主線 {mainline_score:.0f}"
             body.append(f"<div class='ovitem'><div class='ovrank'>#{i}</div><div><div class='ovname'>{esc(name)} <span class='stockcode'>{esc(code)}</span></div><div class='ovmeta'>{esc(meta)}</div></div></div>")
         cols_html.append(f"<div class='ovcol'><div class='ovhead'>{esc(title)}</div>{''.join(body)}</div>")
@@ -549,14 +587,16 @@ def _overview(snap: dict | None):
             if stock:
                 consensus.append(f"{stock.get('name')}（{cnt}/3）")
     if consensus:
-        st.markdown("<div class='consensus'><b>跨週期共識</b><div class='mini-note'>" + esc('、'.join(consensus[:6])) + "</div><div class='consensus-note'>共識代表同一檔在不同時間尺度都強，不再為了畫面去重而隱藏訊號；實際配置時仍只算一個部位。</div></div>", unsafe_allow_html=True)
+        st.markdown("<div class='consensus'><b>跨週期共識</b><div class='mini-note'>" + esc('、'.join(consensus[:6])) + "</div><div class='consensus-note'>共識代表同一檔在不同時間尺度都強；實際配置時仍只算一個部位。</div></div>", unsafe_allow_html=True)
 
     unique_n = len(set(code for code in dup_counts))
-    st.markdown(f"<div class='mini-note'>15 個訊號席位共 {unique_n} 檔股票；重複代表跨週期共振，不直接等同加倍持倉。</div>", unsafe_allow_html=True)
+    mode_text="盤中即時訊號" if any((s.get('intraday') for picks in raw.values() for s in picks)) else "完整日線訊號"
+    st.markdown(f"<div class='mini-note'>{mode_text}｜15 個訊號席位共 {unique_n} 檔股票。</div>", unsafe_allow_html=True)
     st.markdown("<div class='overview'>" + ''.join(cols_html) + "</div>", unsafe_allow_html=True)
 
-    # Diversified allocation is a separate layer so portfolio constraints do not
-    # distort the signal engine.
+    # Portfolio diversification is separate from signal ranking.  Keep using the
+    # daily allocation helper so a few minutes of price action do not rewrite the
+    # strategic portfolio constraints.
     allocation = service.select_cross_horizon_shortlists(snap, n=5, max_appearances=2)
     metrics = service.shortlist_overlap_metrics(allocation)
     st.markdown(f"<div class='mini-note'>若用於實戰配置：去重後約 {metrics.get('unique_tickers',0)} 檔不同股票，單一股票最多跨 2 個週期。</div>", unsafe_allow_html=True)
@@ -577,7 +617,16 @@ def _prime(snap: dict | None, joint: dict | None = None):
         if stock:
             used.add(str(stock.get("ticker")))
             st.markdown(f"<div class='section-kicker'>{esc(H_LABEL[h])}</div>", unsafe_allow_html=True)
-            _row(stock, h, snap, 1, live=False)
+            _row(stock, h, snap, 1, live=bool(stock.get("intraday")))
+
+
+if hasattr(st,"fragment"):
+    @st.fragment(run_every=60)
+    def overview_fragment(snap: dict):
+        _overview(snap,allow_live=True)
+else:
+    def overview_fragment(snap: dict):
+        _overview(snap,allow_live=True)
 
 
 def _doctor(snap: dict | None):
@@ -619,10 +668,10 @@ def _doctor(snap: dict | None):
 
 
 def main():
-    st.set_page_config(page_title="Alpha Radar 16", page_icon="◼", layout="wide", initial_sidebar_state="collapsed")
+    st.set_page_config(page_title="Alpha Radar 16.1", page_icon="◼", layout="wide", initial_sidebar_state="collapsed")
     _bootstrap_secrets()
     st.markdown(CSS, unsafe_allow_html=True)
-    st.markdown("<div class='mast'><div class='brand'>ALPHA<span>/TW</span></div><div class='version'>FINAL 16.0</div></div>", unsafe_allow_html=True)
+    st.markdown("<div class='mast'><div class='brand'>ALPHA<span>/TW</span></div><div class='version'>LIVE 16.1</div></div>", unsafe_allow_html=True)
     DATA_DIR.mkdir(parents=True, exist_ok=True)
 
     if st.session_state.get("alpha_version") != service.OPERATIONS_VERSION:
@@ -640,8 +689,8 @@ def main():
         candidate_size = st.selectbox("比較股票數", [400, 700, 1000], index=2)
         research_pool = st.selectbox("公司資料檔數", [5, 10, 15], index=1)
         status = provider_runtime_status()
-        st.caption("FinMind Token：" + ("已設定" if status.get("finmind_token_configured") else "未設定"))
-        st.caption("盤中：FinMind Sponsor 即時快照；約60秒重排")
+        st.caption("盤中：自動抓取 TWSE/TPEx MIS 即時行情；若有 FinMind 即時權限則優先使用。")
+        st.caption("總覽與各週期頁盤中約每 60 秒自動重排，不需重跑多年模型。")
         if st.button("清除快取"):
             DailyPriceStore(DATA_DIR / "daily_prices.sqlite").clear()
             service.remove_saved_dashboard(DATA_DIR / "dashboard_snapshot.json")
@@ -673,7 +722,7 @@ def main():
                 st.session_state["alpha_last_refresh"] = _taipei_timestamp().strftime("%Y-%m-%d %H:%M:%S")
                 gc.collect()
                 bar.progress(1.0, text=f"100% · 更新完成 · {int(time.monotonic()-started)}s")
-                st.success("更新完成；基準模型使用最近完整交易日。盤中即時排序請切到『即時』或各週期頁。" if market_is_open(_taipei_timestamp()) else "更新完成；已保留最新成功快照。")
+                st.success("更新完成；基準模型仍使用最近完整交易日，盤中總覽會自動套用即時行情重新排序。" if market_is_open(_taipei_timestamp()) else "更新完成；已保留最新成功快照。")
         except ScanBusyError as exc:
             st.warning(str(exc) + "。本頁會繼續使用上一份成功快照。")
         except Exception as exc:
@@ -692,7 +741,10 @@ def main():
     view = st.radio("功能", VIEWS, horizontal=True, label_visibility="collapsed", key="view_v16")
     if view == "總覽":
         st.markdown("<div class='section-kicker'>OVERVIEW</div><div class='section-title'>全景總覽</div>", unsafe_allow_html=True)
-        _overview(snap)
+        if snap and market_is_open(_taipei_timestamp()):
+            overview_fragment(snap)
+        else:
+            _overview(snap,allow_live=False)
     elif view == "即時":
         st.markdown("<div class='section-kicker'>LIVE PULSE</div><div class='section-title'>盤中雷達</div>", unsafe_allow_html=True)
         if not snap:
@@ -715,7 +767,7 @@ def main():
         st.markdown("<div class='section-kicker'>CHECK</div><div class='section-title'>個股診斷</div>", unsafe_allow_html=True)
         _doctor(snap)
 
-    st.caption("歷史案例用於比較，不代表未來結果；V16 以完整日線做基準，盤中只做即時覆蓋；市場主線採官方產業＋供應鏈雙層 breadth，配置與訊號分離。")
+    st.caption("歷史案例用於比較，不代表未來結果；V16.1 以完整日線做基準，盤中總覽與各週期自動套用即時行情重排；市場主線採官方產業＋供應鏈雙層 breadth，配置與訊號分離。")
 
 
 if __name__ == "__main__":
